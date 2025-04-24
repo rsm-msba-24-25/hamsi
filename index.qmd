@@ -12,7 +12,10 @@ about:
 
 ---
 Here is a paragraph about me!
+
+
 Introductions are often difficult, but here's a little something about me. After graduating with a degree in commerce, specializing in financial accounting and audit, I worked in finance and assurance across industries such as healthcare, entertainment, IT, and technology. These experiences sharpened my critical analysis skills and ignited a deep interest in leveraging data to drive business strategies.
+
 
 Currently, I’m pursuing a Master’s in Business Analytics at UC San Diego, where I’m focused on using data-driven insights to solve real-world problems and foster innovation. I’m eager to connect with like-minded professionals and explore opportunities to make meaningful contributions in the field of business analytics
 
