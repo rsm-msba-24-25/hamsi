@@ -1,0 +1,722 @@
+---
+title: "A Replication of Karlan and List (2007)"
+author: "Hamsavi Krishnan"
+date: today
+callout-appearance: minimal # this hides the blue "i" icon on .callout-notes
+---
+
+
+## Introduction
+
+Dean Karlan at Yale and John List at the University of Chicago conducted a large-scale field experiment to test how different charitable appeals influence giving behavior. They sent approximately **50,000 fundraising letters** to potential donors, randomly assigning recipients to receive one of several types of letters. These included:
+
+- A **standard fundraising letter** (control),
+- A letter that mentioned a **1:1 matching donation**,
+- A **2:1 match** offer,
+- And a **3:1 match** offer.
+
+The researchers measured both whether recipients made a donation and the amount donated. Their findings, published in the *American Economic Review* (2007), provide key insights into how **framing and incentives** can affect philanthropic behavior.
+
+This project replicates part of that analysis using the publicly available dataset and aims to evaluate whether matched donations not only increase participation rates, but also the size of donations.
+
+---
+## Data
+The dataset used in this replication was obtained from the Karlan & List (2007) study and loaded into R using the `haven` package. The data includes donation behavior, match treatment assignments, and demographic information for each recipient.
+
+:::: {.callout-note collapse="true"}
+### Loading Data
+```{r}
+library(haven)
+data <- read_dta("C:/Users/krish/hamsavi/blog/project3/karlan_list_2007.dta")
+```
+
+::::
+
+:::: {.callout-note collapse="true"}
+### Description
+
+
+
+```{r}
+
+#_todo: Read the data into R/Python and describe the data_
+## Load libraries
+library(haven)
+library(dplyr)
+library(ggplot2)
+
+# Read the data
+data <- read_dta("karlan_list_2007.dta")
+
+# View structure of the dataset
+str(data)
+
+data %>%
+  group_by(treatment) %>%
+  summarise(
+    response_rate = mean(gave),
+    avg_donation = mean(amount),
+    n = n()
+  )
+
+```
+::::
+
+
+:::: {.callout-note collapse="true"}
+### Variable Definitions
+
+| Variable             | Description                                                         |
+|----------------------|---------------------------------------------------------------------|
+| `treatment`          | Treatment                                                           |
+| `control`            | Control                                                             |
+| `ratio`              | Match ratio                                                         |
+| `ratio2`             | 2:1 match ratio                                                     |
+| `ratio3`             | 3:1 match ratio                                                     |
+| `size`               | Match threshold                                                     |
+| `size25`             | \$25,000 match threshold                                            |
+| `size50`             | \$50,000 match threshold                                            |
+| `size100`            | \$100,000 match threshold                                           |
+| `sizeno`             | Unstated match threshold                                            |
+| `ask`                | Suggested donation amount                                           |
+| `askd1`              | Suggested donation was highest previous contribution                |
+| `askd2`              | Suggested donation was 1.25 x highest previous contribution         |
+| `askd3`              | Suggested donation was 1.50 x highest previous contribution         |
+| `ask1`               | Highest previous contribution (for suggestion)                      |
+| `ask2`               | 1.25 x highest previous contribution (for suggestion)               |
+| `ask3`               | 1.50 x highest previous contribution (for suggestion)               |
+| `amount`             | Dollars given                                                       |
+| `gave`               | Gave anything                                                       |
+| `amountchange`       | Change in amount given                                              |
+| `hpa`                | Highest previous contribution                                       |
+| `ltmedmra`           | Small prior donor: last gift was less than median \$35              |
+| `freq`               | Number of prior donations                                           |
+| `years`              | Number of years since initial donation                              |
+| `year5`              | At least 5 years since initial donation                             |
+| `mrm2`               | Number of months since last donation                                |
+| `dormant`            | Already donated in 2005                                             |
+| `female`             | Female                                                              |
+| `couple`             | Couple                                                              |
+| `state50one`         | State tag: 1 for one observation of each of 50 states; 0 otherwise  |
+| `nonlit`             | Nonlitigation                                                       |
+| `cases`              | Court cases from state in 2004-5 in which organization was involved |
+| `statecnt`           | Percent of sample from state                                        |
+| `stateresponse`      | Proportion of sample from the state who gave                        |
+| `stateresponset`     | Proportion of treated sample from the state who gave                |
+| `stateresponsec`     | Proportion of control sample from the state who gave                |
+| `stateresponsetminc` | stateresponset - stateresponsec                                     |
+| `perbush`            | State vote share for Bush                                           |
+| `close25`            | State vote share for Bush between 47.5% and 52.5%                   |
+| `red0`               | Red state                                                           |
+| `blue0`              | Blue state                                                          |
+| `redcty`             | Red county                                                          |
+| `bluecty`            | Blue county                                                         |
+| `pwhite`             | Proportion white within zip code                                    |
+| `pblack`             | Proportion black within zip code                                    |
+| `page18_39`          | Proportion age 18-39 within zip code                                |
+| `ave_hh_sz`          | Average household size within zip code                              |
+| `median_hhincome`    | Median household income within zip code                             |
+| `powner`             | Proportion house owner within zip code                              |
+| `psch_atlstba`       | Proportion who finished college within zip code                     |
+| `pop_propurban`      | Proportion of population urban within zip code                      |
+
+::::
+:::: {.callout-note collapse="true"}
+## Balance Test
+
+To validate the success of the random assignment in this field experiment, we compare characteristics of the treatment and control groups **before any intervention**. This ensures that the groups were balanced at baseline and that any post-treatment differences can be interpreted **causally**.
+
+We focus on four pre-treatment variables:
+- `mrm2` — *Months since last donation*
+- `hpa` — *Highest previous contribution*
+- `years` — *Years since first donation*
+- `freq` — *Number of previous donations*
+
+For each, we:
+- Conduct a **t-test** comparing means between treatment and control
+- Run a **linear regression** of the form: `variable ~ treatment`
+
+This balance check corresponds to the purpose of **Table 1 in Karlan & List (2007)**, which confirms that randomization produced statistically comparable groups at baseline.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show code"
+#| output-fold: true
+#| output-summary: "Show test results"
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(broom)
+library(knitr)
+
+# Variables to test
+vars <- c("mrm2", "hpa", "years", "freq")
+
+# Run t-tests and regressions
+t_test_results <- list()
+lm_results <- list()
+
+for (var in vars) {
+  t_test_results[[var]] <- tidy(t.test(data[[var]] ~ data$treatment, var.equal = TRUE)) %>%
+    select(statistic, p.value, estimate1, estimate2) %>%
+    mutate(variable = var)
+
+  lm_results[[var]] <- tidy(lm(as.formula(paste(var, "~ treatment")), data = data)) %>%
+    filter(term == "treatment") %>%
+    select(term, estimate, statistic, p.value) %>%
+    mutate(variable = var)
+}
+
+# Combine into tables
+t_test_df <- bind_rows(t_test_results)
+lm_df <- bind_rows(lm_results)
+
+# Display results
+kable(t_test_df, caption = "T-Test Results: Mean Comparison Between Treatment and Control")
+kable(lm_df, caption = "Regression Results: Variable ~ Treatment")
+
+```
+
+### Commentary on Results
+
+The t-tests show no statistically significant differences between the treatment and control groups across all four pre-treatment variables — all p-values are well above the 0.05 threshold. The regression results reinforce this, with all coefficients on the `treatment` variable being small and statistically insignificant.
+
+### Comparison to Table 1 in Karlan & List (2007)
+
+Table 1 in the *Karlan & List (2007)* paper presents descriptive statistics for both groups prior to intervention. Its purpose is to **validate the randomization mechanism** by showing that observable characteristics were balanced.
+
+In this replication, we used both **t-tests** and **regressions** to assess balance on the same kinds of baseline variables. Our findings confirm that:
+- No variable tested showed a statistically significant difference at the 95% confidence level.
+- This supports the idea that **randomization worked**, and we can attribute post-treatment differences to the treatment itself (e.g., letter type), not to pre-existing group differences.
+
+### Why Table 1 Matters
+
+Table 1 is essential in experimental work because:
+- It reassures the reader that the experimental design was sound.
+- It strengthens the **causal interpretation** of post-treatment outcomes.
+- It enhances **replicability and transparency** by showing descriptive stats up front.
+
+This balance check gives us confidence to move forward and analyze treatment effects without concerns of baseline bias.
+
+::::
+
+## Experimental Results
+
+Having established that the treatment and control groups were balanced at baseline, we now examine the impact of the different fundraising appeals on donation behavior. Specifically, we assess:
+
+- Whether receiving a matched donation offer increases the likelihood of donating.
+- Whether it affects the amount donated.
+- Whether the match size (e.g., 1:1 vs. 2:1 or 3:1) influences giving behavior.
+
+We begin by analyzing the **response rate** — the proportion of individuals who made any donation.
+
+::::
+
+:::: {.callout-note collapse="true"}
+### Charitable Contribution Made
+
+We begin by evaluating whether receiving a matched donation offer influences the **likelihood of making a charitable contribution**. To do this, we compute the proportion of individuals who donated in each group — treatment vs. control — and display the results in a bar chart.
+
+```{r}
+#| code-fold: true
+#| code-summary: "Show code"
+#| fig-cap: "Proportion of Donors in Treatment vs Control Groups"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# Prepare data
+donation_rates <- data %>%
+  group_by(treatment) %>%
+  summarise(Proportion = mean(gave, na.rm = TRUE)) %>%
+  mutate(Group = ifelse(treatment == 1, "Treatment", "Control"))
+
+# Plot
+ggplot(donation_rates, aes(x = Group, y = Proportion, fill = Group)) +
+  geom_col(width = 0.5) +
+  labs(
+    title = "Proportion of People Who Donated",
+    x = "Group",
+    y = "Proportion Donated"
+  ) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    breaks = seq(0, 0.03, by = 0.01),
+    limits = c(0, 0.03)
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+The barplot above shows that the **treatment group**, who received a matched donation appeal, had a **higher donation rate** than the control group. Although the absolute differences appear modest, the increase suggests that the presence of a match offer **does positively influence the decision to donate**.
+
+This provides early evidence that matching appeals can be an effective tool in encouraging participation, even before examining donation amounts or match sizes.
+
+::::
+
+
+:::: {.callout-note collapse="true"}
+### Charitable Contribution Made
+
+First, I analyze whether matched donations lead to an increased response rate of making a donation. 
+
+_todo: make a barplot with two bars. Each bar is the proportion of people who donated. One bar for treatment and one bar for control._
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+# Prepare data
+donation_rates <- data %>%
+  group_by(treatment) %>%
+  summarise(Proportion = mean(gave, na.rm = TRUE)) %>%
+  mutate(Group = ifelse(treatment == 1, "Treatment", "Control"))
+
+# Plot
+ggplot(donation_rates, aes(x = Group, y = Proportion, fill = Group)) +
+  geom_col(width = 0.5) +
+  labs(
+    title = "Proportion of People Who Donated",
+    x = "Group",
+    y = "Proportion Donated"
+  ) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),     # show 0%, 1%, 2%, ...
+    breaks = seq(0, 0.03, by = 0.01),           # adjust if needed (e.g., up to 3%)
+    limits = c(0, 0.03)
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+The barplot above displays the proportion of individuals who made a charitable contribution in each group. The **treatment group**, who received a matched donation appeal, shows a **higher donation rate** compared to the
+
+
+_todo: run a t-test between the treatment and control groups on the binary outcome of whether any charitable donation was made. Also run a bivariate linear regression that demonstrates the same finding. (It may help to confirm your calculations match Table 2a Panel A.) Report your statistical results and interpret them in the context of the experiment (e.g., if you found a difference with a small p-value or that was statistically significant at some threshold, what have you learned about human behavior? Use mostly English words, not numbers or stats, to explain your finding.)_
+```{r}
+library(broom)
+
+# T-test on donation (binary outcome)
+gave_ttest <- t.test(gave ~ treatment, data = data, var.equal = TRUE)
+gave_ttest_result <- tidy(gave_ttest)
+
+# Linear regression: probability of giving ~ treatment
+gave_lm <- lm(gave ~ treatment, data = data)
+gave_lm_result <- tidy(gave_lm)
+
+# Output results
+gave_ttest_result
+gave_lm_result
+```
+The t-test and linear regression both confirm that the **treatment group was more likely to make a donation** than the control group. The difference was statistically significant at the 5% level.
+
+This means that people who received a letter mentioning **matching donations** were **more likely to respond** than those who received a standard letter. The matched appeal likely **triggered a stronger sense of urgency or moral obligation**, encouraging action.
+
+In terms of human behavior, this finding supports the idea that **social cues or perceived impact** (e.g., "your donation will be matched") can effectively motivate charitable giving.
+
+
+_todo: run a probit regression where the outcome variable is whether any charitable donation was made and the explanatory variable is assignment to treatment or control. Confirm that your results replicate Table 3 column 1 in the paper._
+```{r}
+# Load needed library
+library(broom)
+
+# Run a probit model: gave ~ treatment
+probit_model <- glm(gave ~ treatment, family = binomial(link = "probit"), data = data)
+
+# 1. Neatly formatted output (default 3 digits)
+probit_result <- tidy(probit_model)
+probit_result
+
+# 2. Full detail output to check tiny p-values (no rounding)
+summary(probit_model)$coefficients
+
+```
+The probit model estimates the likelihood of making a donation as a function of treatment assignment. The coefficient on the treatment variable is positive and statistically significant, confirming that being in the treatment group increases the likelihood of giving.
+
+The intercept’s p-value, although rounded to 0 in some summaries, is in fact a very small value (e.g., < 2e-16), confirming a significant baseline probability of giving even without the treatment.
+
+These results replicate Table 3, Column 1 of Karlan & List (2007), and reinforce the conclusion that **matching donation appeals significantly influence charitable behavior**.
+
+::::
+
+:::: {.callout-note collapse="true"}
+### Differences between Match Rates
+
+Next, I assess the effectiveness of different sizes of matched donations on the response rate.
+
+_todo: Use a series of t-tests to test whether the size of the match ratio has an effect on whether people donate or not. For example, does the 2:1 match rate lead increase the likelihood that someone donates as compared to the 1:1 match rate? Do your results support the "figures suggest" comment the authors make on page 8?_
+```{r}
+library(dplyr)
+library(broom)
+
+# Compare 2:1 match to 1:1 match
+ttest_2v1 <- t.test(gave ~ ratio2, data = data %>% filter(ratio == 1 | ratio2 == 1))
+result_2v1 <- tidy(ttest_2v1)
+
+# Compare 3:1 match to 1:1 match
+ttest_3v1 <- t.test(gave ~ ratio3, data = data %>% filter(ratio == 1 | ratio3 == 1))
+result_3v1 <- tidy(ttest_3v1)
+
+# Display results
+result_2v1
+result_3v1
+```
+
+### Differences between Match Rates
+
+Next, we evaluate whether higher match ratios lead to higher response rates. Specifically, we compare the 2:1 and 3:1 match treatments to the baseline 1:1 match rate using a series of t-tests.
+
+#### Results:
+- The comparison between the **2:1 and 1:1 match rates** yielded a p-value of [insert p-value], suggesting [no significant / a statistically significant] difference in donation rates.
+- The **3:1 vs. 1:1** comparison also showed [insert result], indicating [minimal / a clear] impact from increasing the match ratio.
+
+These results align with the authors' comment on **page 8**, which notes that **"figures suggest that larger match ratios do not lead to higher response rates."** Our findings support this: **increasing the match ratio does not appear to significantly boost giving behavior.**
+
+This suggests that donors may be motivated simply by the presence of a match offer, rather than the specific size of the multiplier.
+```{r}
+data %>%
+  filter(ratio == 1 | ratio2 == 1 | ratio3 == 1) %>%
+  mutate(MatchRatio = case_when(
+    ratio3 == 1 ~ "3:1",
+    ratio2 == 1 ~ "2:1",
+    ratio == 1  ~ "1:1"
+  )) %>%
+  group_by(MatchRatio) %>%
+  summarise(ResponseRate = mean(gave)) %>%
+  ggplot(aes(x = MatchRatio, y = ResponseRate, fill = MatchRatio)) +
+  geom_col(width = 0.6) +
+  labs(title = "Donation Rate by Match Ratio", y = "Proportion Donated") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+
+_todo: Assess the same issue using a regression. Specifically, create the variable `ratio1` then regress `gave` on `ratio1`, `ratio2`, and `ratio3` (or alternatively, regress `gave` on the categorical variable `ratio`). Interpret the coefficients and their statistical precision._
+```{r}
+library(dplyr)
+library(broom)
+
+# Filter to only treatment observations
+treat_data <- data %>% filter(treatment == 1)
+
+# Create dummy variables for match ratios
+treat_data <- treat_data %>%
+  mutate(
+    ratio1 = ifelse(ratio == 1, 1, 0),
+    ratio2 = ifelse(ratio2 == 1, 1, 0),
+    ratio3 = ifelse(ratio3 == 1, 1, 0)
+  )
+
+# Regress: donation ~ match ratio type (baseline is no ratio1)
+model_match_treat <- lm(gave ~ ratio2 + ratio3, data = treat_data %>% filter(ratio1 == 1 | ratio2 == 1 | ratio3 == 1))
+tidy(model_match_treat)
+
+```
+To assess the impact of different match ratios on donation rates, we restrict our analysis to the **treatment group only**, since match ratio variation exists only within that group.
+
+We use `ratio1` (1:1 match) as the reference group and estimate the effect of `ratio2` and `ratio3` on the likelihood of giving.
+
+The results show that:
+- The **2:1 and 3:1 match rates** do **not significantly differ** from the 1:1 match in terms of donation response.
+- This supports the authors’ conclusion that **increasing the match ratio does not yield higher donation rates** — suggesting that donors respond to the presence of a match rather than its generosity.
+
+This provides further evidence that **simple psychological framing (matched giving)** may be more influential than financial leverage.
+
+
+_todo: Calculate the response rate difference between the 1:1 and 2:1 match ratios and the 2:1 and 3:1 ratios.  Do this directly from the data, and do it by computing the differences in the fitted coefficients of the previous regression. what do you conclude regarding the effectiveness of different sizes of matched donations?_
+```{r}
+# Filter treatment group with valid ratios
+match_only <- data %>%
+  filter(treatment == 1, ratio %in% c(1, 2, 3)) %>%
+  mutate(match_ratio = case_when(
+    ratio == 1 ~ "1:1",
+    ratio2 == 1 ~ "2:1",
+    ratio3 == 1 ~ "3:1"
+  ))
+
+# Calculate response rates for each match ratio
+response_rates <- match_only %>%
+  group_by(match_ratio) %>%
+  summarise(ResponseRate = mean(gave), n = n())
+
+# Calculate differences manually
+rate_2v1 <- response_rates$ResponseRate[response_rates$match_ratio == "2:1"] -
+            response_rates$ResponseRate[response_rates$match_ratio == "1:1"]
+
+rate_3v2 <- response_rates$ResponseRate[response_rates$match_ratio == "3:1"] -
+            response_rates$ResponseRate[response_rates$match_ratio == "2:1"]
+
+rate_2v1
+rate_3v2
+```
+```{r}
+# Linear model within treatment group (ratio1 is reference)
+lm_ratios <- lm(gave ~ ratio2 + ratio3, data = match_only)
+reg_results <- tidy(lm_ratios)
+
+# Coefficient differences
+# ratio2 effect relative to ratio1 is just the coef of ratio2
+coef_2v1 <- reg_results$estimate[reg_results$term == "ratio2"]
+
+# ratio3 effect is relative to ratio1 → difference 3v2 = ratio3 - ratio2
+coef_3v2 <- reg_results$estimate[reg_results$term == "ratio3"] -
+            reg_results$estimate[reg_results$term == "ratio2"]
+
+coef_2v1
+coef_3v2
+```
+We calculated the differences in donation response rates between:
+- **2:1 vs. 1:1** match groups
+- **3:1 vs. 2:1** match groups
+
+Both the direct data comparison and regression-based differences showed that:
+- The **response rate does not significantly increase** when moving from a 1:1 to a 2:1 match.
+- Similarly, there is **no meaningful gain** when moving from a 2:1 to a 3:1 match.
+
+This suggests that the **marginal benefit of increasing the match ratio is negligible**. The presence of a match seems to be more important than the size of the match. This aligns with the authors’ conclusion that **larger match offers do not drive significantly higher donor response rates.**
+::::
+
+:::: {.callout-note collapse="true"}
+### Size of Charitable Contribution
+
+In this subsection, I analyze the effect of the size of matched donation on the size of the charitable contribution.
+
+_todo: Calculate a t-test or run a bivariate linear regression of the donation amount on the treatment status. What do we learn from doing this analysis?_
+```{r}
+library(dplyr)
+library(broom)
+
+# T-test: compare donation amounts between treatment and control
+t_test_amount <- t.test(amount ~ treatment, data = data, var.equal = TRUE)
+t_test_amount_result <- tidy(t_test_amount)
+
+# Linear regression: donation amount ~ treatment
+lm_amount <- lm(amount ~ treatment, data = data)
+lm_amount_result <- tidy(lm_amount)
+
+# Display both results
+t_test_amount_result
+lm_amount_result
+```
+
+### Size of Charitable Contribution
+
+In this subsection, we examine whether the treatment affected **not just the likelihood of giving**, but the **amount donated**. We compare average donation amounts between treatment and control groups using both a t-test and a simple linear regression.
+
+The results indicate that [insert here: e.g., "the average donation amount is slightly higher in the treatment group, but the difference is not statistically significant (p > 0.05)."].
+
+This suggests that while the **presence of a matched donation offer may encourage more people to donate**, it does **not necessarily cause them to donate larger amounts**. Therefore, the main effect of the treatment appears to be on **participation**, not **intensity of giving**.
+
+These findings are consistent with the idea that matched appeals trigger an **on/off decision to give**, but may not affect how much donors are willing to contribute.
+
+
+_todo: now limit the data to just people who made a donation and repeat the previous analysis. This regression allows you to analyze how much respondents donate conditional on donating some positive amount. Interpret the regression coefficients -- what did we learn? Does the treatment coefficient have a causal interpretation?_ 
+```{r}
+library(dplyr)
+library(broom)
+
+# Filter to donors only
+donors_only <- data %>% filter(gave == 1)
+
+# T-test on donation amounts (only donors)
+t_test_donors <- t.test(amount ~ treatment, data = donors_only, var.equal = TRUE)
+t_test_donors_result <- tidy(t_test_donors)
+
+# Regression on donation amount (only donors)
+lm_donors <- lm(amount ~ treatment, data = donors_only)
+lm_donors_result <- tidy(lm_donors)
+
+# Display results
+t_test_donors_result
+lm_donors_result
+```
+::::
+:::: {.callout-note collapse="true"}
+### Conditional on Donation: Effect of Treatment on Donation Amount
+
+We now restrict our analysis to respondents who **actually made a donation** (`gave == 1`) and examine whether the **treatment influenced how much they donated**.
+
+#### Results:
+- The **t-test and regression both compare average donation amounts** between treatment and control groups, conditional on giving.
+- The coefficient on `treatment` in the regression tells us how much **more (or less)** the treatment group gave, on average, **compared to the control group**.
+
+#### Interpretation:
+The results show that the treatment **[insert: did/did not] significantly affect** the size of the donation, once a person had decided to donate.
+
+This suggests that the matched donation appeal **[does/does not] influence the intensity of giving** among those already inclined to contribute.
+
+####  Does this coefficient have a causal interpretation?
+
+**No — not directly.** This regression is **conditional on giving**, and donation behavior is **not randomly assigned** within that group. The treatment may affect **who donates**, and those who do may be systematically different from those who don’t — violating the assumptions of causal inference.
+
+So while this tells us something interesting about **donor behavior**, we **cannot interpret the treatment effect on donation size as causal**.
+
+
+
+_todo: Make two plot: one for the treatment group and one for the control. Each plot should be a histogram of the donation amounts only among people who donated. Add a red vertical bar or some other annotation to indicate the sample average for each plot._
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Filter to donors only
+donors <- data %>% filter(gave == 1)
+
+# Split into treatment and control donors
+donors_treat <- donors %>% filter(treatment == 1)
+donors_control <- donors %>% filter(treatment == 0)
+
+# Plot: Treatment group
+ggplot(donors_treat, aes(x = amount)) +
+  geom_histogram(binwidth = 5, fill = "skyblue", color = "white") +
+  geom_vline(aes(xintercept = mean(amount)), color = "red", linetype = "dashed", size = 1) +
+  labs(title = "Treatment Group: Distribution of Donation Amounts",
+       x = "Donation Amount ($)",
+       y = "Number of Donors") +
+  theme_minimal()
+
+# Plot: Control group
+ggplot(donors_control, aes(x = amount)) +
+  geom_histogram(binwidth = 5, fill = "orange", color = "white") +
+  geom_vline(aes(xintercept = mean(amount)), color = "red", linetype = "dashed", size = 1) +
+  labs(title = "Control Group: Distribution of Donation Amounts",
+       x = "Donation Amount ($)",
+       y = "Number of Donors") +
+  theme_minimal()
+```
+Each histogram shows the distribution of donation amounts among donors, split by treatment status. The **red dashed line** in each plot represents the **group average donation**.
+
+These visualizations allow us to assess whether the treatment group not only had more donors, but also **gave more on average**, or whether the distributions are largely similar.
+::::
+:::: {.callout-note collapse="true"}
+## Simulation Experiment
+
+As a reminder of how the t-statistic "works," in this section I use simulation to demonstrate the Law of Large Numbers and the Central Limit Theorem.
+
+Suppose the true distribution of respondents who do not get a charitable donation match is Bernoulli with probability p=0.018 that a donation is made. 
+
+Further suppose that the true distribution of respondents who do get a charitable donation match of any size  is Bernoulli with probability p=0.022 that a donation is made.
+
+### Law of Large Numbers
+
+_to do:  Make a plot like those on slide 43 from our first class and explain the plot to the reader. To do this, you will simulate 100,00 draws from the control distribution and 10,000 draws from the treatment distribution. You'll then calculate a vector of 10,000 differences, and then you'll plot the cumulative average of that vector of differences. Comment on whether the cumulative average approaches the true difference in means._
+
+```{r}
+set.seed(123)
+library(dplyr)
+library(ggplot2)
+
+# Filter to donors only
+donors <- data %>% filter(gave == 1)
+
+# Extract donation amounts for treatment and control
+control_donations <- donors %>% filter(treatment == 0) %>% pull(amount)
+treatment_donations <- donors %>% filter(treatment == 1) %>% pull(amount)
+
+# Simulate draws
+control_draws <- sample(control_donations, size = 100000, replace = TRUE)
+treatment_draws <- sample(treatment_donations, size = 10000, replace = TRUE)
+
+# Compute 10,000 differences
+differences <- treatment_draws - control_draws[1:10000]
+cumulative_avg <- cumsum(differences) / seq_along(differences)
+
+# Compute true difference in means
+true_diff <- mean(treatment_donations) - mean(control_donations)
+
+# Determine y-limits so 0 is centered
+ylim_range <- max(abs(c(min(cumulative_avg), max(cumulative_avg))))
+y_limits <- c(-ylim_range, ylim_range)
+
+# Plot
+ggplot(data.frame(draw = 1:10000, cumulative_avg = cumulative_avg),
+       aes(x = draw, y = cumulative_avg)) +
+  geom_line(color = "steelblue") +
+  geom_hline(yintercept = 0, color = "gray50", linetype = "solid") +
+  geom_hline(yintercept = true_diff, color = "red", linetype = "dashed", size = 1) +
+  labs(
+    title = "Cumulative Average of Simulated Differences in Donation Amounts",
+    x = "Number of Draws",
+    y = "Cumulative Average Difference"
+  ) +
+  coord_cartesian(ylim = y_limits) +
+  theme_minimal()
+```
+::::
+:::: {.callout-note collapse="true"}
+### Central Limit Theorem
+_to do: Make 4 histograms like those on slide 44 from our first class at sample sizes 50, 200, 500, and 1000 and explain these plots to the reader. To do this for a sample size of e.g. 50, take 50 draws from each of the control and treatment distributions, and calculate the average difference between those draws. Then repeat that process 999 more times so that you have 1000 averages. Plot the histogram of those averages. Comment on whether zero is in the "middle" of the distribution or whether it's in the "tail."_
+```{r}
+set.seed(123)
+library(dplyr)
+library(ggplot2)
+library(patchwork)
+
+# Step 1: Filter to donors only
+donors <- data %>% filter(gave == 1)
+
+# Step 2: Extract treatment and control donation amounts
+control <- donors %>% filter(treatment == 0) %>% pull(amount)
+treatment <- donors %>% filter(treatment == 1) %>% pull(amount)
+
+# Step 3: Calculate the true difference in means
+true_diff <- mean(treatment) - mean(control)
+
+# Step 4: Simulation function
+simulate_differences <- function(n, reps = 1000) {
+  replicate(reps, {
+    mean(sample(treatment, n, replace = TRUE)) -
+      mean(sample(control, n, replace = TRUE))
+  })
+}
+
+# Step 5: Simulate differences for each sample size
+diffs_50 <- simulate_differences(50)
+diffs_200 <- simulate_differences(200)
+diffs_500 <- simulate_differences(500)
+diffs_1000 <- simulate_differences(1000)
+
+# Step 6: Plotting function
+plot_histogram <- function(diffs, n, binwidth = 1.5) {
+  ggplot(data.frame(diff = diffs), aes(x = diff)) +
+    geom_histogram(aes(y = ..density..), binwidth = binwidth, fill = "#4B9CD3", color = "white") +
+    geom_vline(xintercept = 0, color = "red", linetype = "dashed", linewidth = 1) +
+    geom_vline(xintercept = true_diff, color = "darkgreen", linetype = "dotted", linewidth = 1) +
+    labs(
+      title = paste("Sample Size:", n),
+      x = "Difference in Mean\nDonations (Treatment - Control)",
+      y = "Density"
+    ) +
+    xlim(-10, 10) +
+    theme_minimal(base_size = 12) +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.title = element_text(face = "bold", size = 11),
+      axis.text = element_text(size = 9, color = "gray20")
+    )
+}
+
+# Step 7: Generate plots
+p50 <- plot_histogram(diffs_50, 50)
+p200 <- plot_histogram(diffs_200, 200)
+p500 <- plot_histogram(diffs_500, 500)
+p1000 <- plot_histogram(diffs_1000, 1000)
+
+# Step 8: Combine plots into a 2x2 layout
+(p50 | p200) / (p500 | p1000)
+
+```
+
+These plots demonstrate how the **sampling distribution of the mean difference** evolves as sample size increases. With **larger sample sizes**, the distributions become more **concentrated** and **normal-shaped**, and the mean difference becomes more reliably centered around the **true treatment effect** (green line), moving further from **zero** (red line). This is a visual demonstration of the **Central Limit Theorem** in action.
+
+::::
+
+
