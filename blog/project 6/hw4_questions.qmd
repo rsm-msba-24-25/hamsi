@@ -1,0 +1,569 @@
+---
+title: "Machine Learning    "
+author: "Hamsavi Krishnan"
+date: today
+format: html
+jupyter: python3
+---
+
+
+## 1a. K-Means
+We analyze the *Palmer Penguins* dataset using **K-Means clustering** to uncover natural groupings based on physical features. Specifically, we cluster penguins using `bill_length_mm` and `flipper_length_mm`, two continuous variables that capture essential morphological differences.
+
+We implement the K-Means algorithm from scratch to visualize how centroids shift across iterations and compare it with the built-in `sklearn.KMeans` function to validate our results.
+
+
+```{python}
+#| code-fold: true
+#| code-summary: "Custom K-Means"
+#| fig-cap: "K-Means clustering iterations on Palmer Penguins dataset"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+    
+
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm
+
+# Step 1: Prepare the data
+import pandas as pd
+
+# Load the Palmer Penguins dataset
+penguins = pd.read_csv(r'C:/Users/krish/hamsavi/blog/project 6/palmer_penguins.csv')
+X = penguins[['bill_length_mm', 'flipper_length_mm']].dropna().values
+
+# Step 2: Initialize parameters
+def initialize_centroids(X, k):
+    np.random.seed(42)
+    indices = np.random.choice(len(X), k, replace=False)
+    return X[indices]
+
+# Step 3: Assign clusters
+def assign_clusters(X, centroids):
+    distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
+    return np.argmin(distances, axis=1)
+
+# Step 4: Update centroids
+def update_centroids(X, labels, k):
+    return np.array([X[labels == i].mean(axis=0) for i in range(k)])
+
+#| code-fold: true
+#| code-summary: "Save plots for GIF"
+#| message: false
+#| warning: false
+import os
+def kmeans_custom_save(X, k=3, max_iters=10, output_dir="kmeans_frames"):
+    os.makedirs(output_dir, exist_ok=True)
+    centroids = initialize_centroids(X, k)
+
+    for iteration in range(max_iters):
+        labels = assign_clusters(X, centroids)
+        new_centroids = update_centroids(X, labels, k)
+
+        # Save the plot instead of showing it
+        plt.figure()
+        for i in range(k):
+            cluster_points = X[labels == i]
+            plt.scatter(cluster_points[:, 0], cluster_points[:, 1], s=30, label=f'Cluster {i+1}')
+        plt.scatter(new_centroids[:, 0], new_centroids[:, 1], color='black', marker='X', s=100, label='Centroids')
+        plt.xlabel("Bill Length (mm)")
+        plt.ylabel("Flipper Length (mm)")
+        plt.title(f"K-Means Iteration {iteration+1}")
+        plt.legend()
+        plt.grid(True)
+
+        # Save image
+        filename = os.path.join(output_dir, f"frame_{iteration:02}.png")
+        plt.savefig(filename)
+        plt.close()
+
+        # Stop if converged
+        if np.allclose(centroids, new_centroids):
+            break
+        centroids = new_centroids
+
+    # ✅ Return final result
+    return labels, centroids
+
+
+# Run custom K-means
+labels_custom, centroids_custom = kmeans_custom_save(X, k=3)
+
+import imageio.v2 as imageio
+from glob import glob
+
+def create_gif(frame_dir="kmeans_frames", output_gif="kmeans_animation.gif", fps=1):
+    frames = sorted(glob(f"{frame_dir}/frame_*.png"))
+    images = [imageio.imread(frame) for frame in frames]
+    imageio.mimsave(output_gif, images, fps=fps)
+
+create_gif()
+```
+
+### Visualizing Clustering Dynamics with K-Means
+
+To better understand how the K-Means algorithm converges, we animated the iterative process of cluster formation using bill length and flipper length data from the Palmer Penguins dataset.
+
+![K-Means animation showing centroid movement and cluster separation over time](kmeans_animation.gif)
+
+
+
+```{python}
+#| code-fold: true
+#| code-summary: "Compare to built-in KMeans"
+#| fig-cap: "Built-in KMeans result on Palmer Penguins data"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+from sklearn.cluster import KMeans
+
+# Fit built-in KMeans
+kmeans_builtin = KMeans(n_clusters=3, n_init=10, random_state=42)
+labels_builtin = kmeans_builtin.fit_predict(X)
+
+# Plot the result
+plt.figure()
+for i in range(3):
+    cluster_points = X[labels_builtin == i]
+    plt.scatter(cluster_points[:, 0], cluster_points[:, 1], s=30, label=f'Cluster {i+1}')
+plt.scatter(kmeans_builtin.cluster_centers_[:, 0], kmeans_builtin.cluster_centers_[:, 1], 
+            color='black', marker='X', s=100, label='Centroids')
+plt.xlabel("Bill Length (mm)")
+plt.ylabel("Flipper Length (mm)")
+plt.title("Built-in KMeans Clustering Result")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+```
+
+Our custom implementation and the built-in sklearn.KMeans both produce visually similar clusters. The built-in version converges faster (internally optimized) and supports advanced features like inertia_ and n_init handling. However, our custom version offers transparency and learning value by illustrating how centroid updates and point assignments work step-by-step.
+      
+### K Selection Using WCSS and Silhouette Scores
+
+To choose the appropriate number of clusters for our K-Means model, we compared two widely used evaluation metrics: **Within-Cluster Sum of Squares (WCSS)** and **Silhouette Score**. WCSS helps us assess cluster compactness, while the silhouette score evaluates how well-separated the clusters are.
+
+We ran K-Means for values of **K = 2 through 7**, calculating both metrics at each step. The chart below visualizes these results side by side, helping us identify the most effective number of clusters.
+
+```{python}
+#| code-fold: true
+#| code-summary: "K Selection"
+#| fig-cap: "Evaluating Optimal K with WCSS and Silhouette Score"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+import matplotlib.pyplot as plt
+
+# K range
+K_range = range(2, 8)
+wcss = []
+silhouette_scores = []
+
+for k in K_range:
+    kmeans = KMeans(n_clusters=k, n_init=10, random_state=42)
+    labels = kmeans.fit_predict(X)
+    
+    # Within-cluster sum of squares
+    wcss.append(kmeans.inertia_)
+    
+    # Silhouette score
+    score = silhouette_score(X, labels)
+    silhouette_scores.append(score)
+
+# Plot results
+fig, ax1 = plt.subplots()
+
+color = 'tab:blue'
+ax1.set_xlabel('Number of Clusters (K)')
+ax1.set_ylabel('WCSS', color=color)
+ax1.plot(K_range, wcss, marker='o', label='WCSS', color=color)
+ax1.tick_params(axis='y', labelcolor=color)
+
+ax2 = ax1.twinx()
+color = 'tab:green'
+ax2.set_ylabel('Silhouette Score', color=color)
+ax2.plot(K_range, silhouette_scores, marker='s', label='Silhouette Score', color=color)
+ax2.tick_params(axis='y', labelcolor=color)
+
+plt.title("Evaluating Optimal K with WCSS and Silhouette Score")
+fig.tight_layout()
+plt.show()
+
+```
+```{python}
+#| code-fold: true
+#| code-summary: "Numerical Results for WCSS and Silhouette"
+#| message: false
+#| warning: false
+
+import pandas as pd
+import numpy as np
+
+results_df = pd.DataFrame({
+    "K": list(K_range),
+    "WCSS": np.round(wcss, 2),
+    "Silhouette Score": np.round(silhouette_scores, 3)
+})
+
+results_df
+```
+The table above shows the exact WCSS and silhouette scores used in our evaluation. These values reinforce the conclusion from the graph: K=3 is a reasonable choice based on the elbow in WCSS, while K=2 gives the best silhouette score.
+
+
+### Choosing the Optimal Number of Clusters
+
+To evaluate how many clusters best segment the penguins based on bill length and flipper length, we compared two key metrics across values of K from 2 to 7:
+
+- **Within-cluster sum of squares (WCSS)**: Measures compactness; lower is better
+- **Silhouette score**: Measures how well-separated and cohesive clusters are; higher is better
+
+The WCSS plot shows a clear elbow at **K = 3**, suggesting this value offers a good balance between complexity and model fit. Meanwhile, the silhouette score peaks at **K = 2**, indicating that two clusters provide the cleanest separation.
+
+Overall, **K = 3** appears to offer the most balanced clustering solution, especially if interpretability and segmentation richness are priorities.
+
+
+
+## 2a. K Nearest Neighbors
+
+In this section, we implement and explore the K-Nearest Neighbors (KNN) classification algorithm using a synthetic dataset. This dataset features a nonlinear decision boundary, making it an ideal case to demonstrate KNN's ability to handle flexible, non-parametric classification tasks.
+
+
+
+```{python}
+#| code-fold: true
+#| code-summary: "Generate Synthetic Dataset for KNN"
+#| fig-cap: "Synthetic data with nonlinear decision boundary"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Reproducibility
+np.random.seed(42)
+
+# Generate features
+n = 100
+x1 = np.random.uniform(-3, 3, n)
+x2 = np.random.uniform(-3, 3, n)
+
+# Define decision boundary
+boundary = np.sin(4 * x1) + x1
+y = (x2 > boundary).astype(int)
+
+# Combine into DataFrame
+dat = pd.DataFrame({
+    "x1": x1,
+    "x2": x2,
+    "y": y
+})
+
+# Plot the data
+plt.figure()
+plt.scatter(dat["x1"], dat["x2"], c=dat["y"], cmap="bwr", edgecolor="k")
+plt.plot(np.sort(x1), np.sort(boundary), color="black", linestyle="--", label="Decision Boundary")
+plt.xlabel("x1")
+plt.ylabel("x2")
+plt.title("Synthetic Classification Data with Nonlinear Boundary")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+```
+```{python}
+#| code-fold: true
+#| code-summary: "Custom KNN Classifier"
+#| message: false
+#| warning: false
+
+def knn_predict(X_train, y_train, X_test, k=5):
+    predictions = []
+    for point in X_test:
+        distances = np.linalg.norm(X_train - point, axis=1)
+        nearest_indices = np.argsort(distances)[:k]
+        nearest_labels = y_train[nearest_indices]
+        vote = np.round(nearest_labels.mean())  # majority vote
+        predictions.append(int(vote))
+    return np.array(predictions)
+```
+
+The following plot shows the synthetic data used for training. Points are colored based on class label `y`, and the dashed curve represents the true underlying decision boundary.
+
+```{python}
+#| code-fold: true
+#| code-summary: "Visualize Decision Boundary for Custom KNN"
+#| fig-cap: "Custom KNN decision regions with training points"
+#| fig-width: 6
+#| fig-height: 5
+
+# Prepare training data
+X_train = dat[["x1", "x2"]].values
+y_train = dat["y"].values
+
+# Create meshgrid for prediction
+xx, yy = np.meshgrid(np.linspace(-3, 3, 300), np.linspace(-3, 3, 300))
+grid_points = np.c_[xx.ravel(), yy.ravel()]
+
+# Predict using custom KNN
+Z = knn_predict(X_train, y_train, grid_points, k=5)
+Z = Z.reshape(xx.shape)
+
+# Plot decision regions
+plt.figure()
+plt.contourf(xx, yy, Z, cmap="bwr", alpha=0.3)
+plt.scatter(dat["x1"], dat["x2"], c=dat["y"], cmap="bwr", edgecolor="k")
+plt.xlabel("x1")
+plt.ylabel("x2")
+plt.title("Custom KNN Decision Regions (k=5)")
+plt.grid(True)
+plt.show()
+```
+
+
+
+For comparison, we also apply `sklearn.KNeighborsClassifier`. The resulting boundary is nearly identical, which validates the correctness of our hand-coded algorithm.
+
+```{python}
+#| code-fold: true
+#| code-summary: "Compare with sklearn KNeighborsClassifier"
+#| fig-cap: "sklearn KNN decision boundary (k=5)"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+from sklearn.neighbors import KNeighborsClassifier
+
+# Fit sklearn KNN
+knn = KNeighborsClassifier(n_neighbors=5)
+knn.fit(X_train, y_train)
+
+# Predict on same grid
+Z_sklearn = knn.predict(grid_points).reshape(xx.shape)
+
+# Plot sklearn decision boundary
+plt.figure()
+plt.contourf(xx, yy, Z_sklearn, cmap="bwr", alpha=0.3)
+plt.scatter(X_train[:, 0], X_train[:, 1], c=y_train, cmap="bwr", edgecolor="k")
+plt.xlabel("x1")
+plt.ylabel("x2")
+plt.title("sklearn KNN Decision Boundary (k=5)")
+plt.grid(True)
+plt.show()
+```
+
+### KNN Classification Results
+
+We used a synthetic dataset with a nonlinear decision boundary to test our custom K-Nearest Neighbors (KNN) classifier. The classifier predicts whether each point lies above or below a curved boundary defined by `y = sin(4x1) + x1`.
+
+The decision boundary learned by our KNN model (k=5) closely follows the true underlying pattern. When compared to `sklearn.KNN`, our implementation gives very similar results, validating its correctness.
+
+This example illustrates how KNN can flexibly model nonlinear decision boundaries using only local proximity to labeled data.
+
+
+
+```{python}
+#| code-fold: true
+#| code-summary: "Visualize Class Labels and Decision Boundary"
+#| fig-cap: "Scatterplot of synthetic data colored by class with wiggly boundary"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+# Use the same dataset you created earlier
+# If not already defined:
+# x1, x2 = np.random.uniform(-3, 3, n), np.random.uniform(-3, 3, n)
+# boundary = np.sin(4 * x1) + x1
+# y = (x2 > boundary).astype(int)
+
+# Create DataFrame
+dat = pd.DataFrame({
+    "x1": x1,
+    "x2": x2,
+    "y": y
+})
+
+# Plot the data
+plt.figure()
+plt.scatter(dat["x1"], dat["x2"], c=dat["y"], cmap="bwr", edgecolor="k", s=60)
+plt.plot(np.sort(x1), np.sort(boundary), linestyle="--", color="black", label="True Boundary")
+plt.xlabel("x1")
+plt.ylabel("x2")
+plt.title("Synthetic Data Colored by Class")
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+We begin by visualizing the synthetic dataset generated for the K-Nearest Neighbors task. Each point is plotted by its `x1` and `x2` values, and colored based on the binary class `y`. The dashed curve represents the true underlying decision boundary, defined by the function `x2 = sin(4x1) + x1`. This boundary creates a nonlinear separation between classes, making it an ideal test case for KNN.
+
+
+### Generating a Test Dataset
+
+To evaluate our KNN classifier on unseen data, we generated a new test dataset using the same logic as the training set, but with a different random seed. This ensures that while the underlying decision boundary remains the same, the specific data points differ — mimicking a real-world scenario where a model is applied to new samples.
+
+As before, the outcome variable `y` is defined by whether `x2` lies above or below a nonlinear boundary defined by `sin(4 * x1) + x1`. The dashed curve in the plot shows this boundary for the test data.
+
+This test set will be used to assess how well our KNN model generalizes beyond the data it was trained on.
+
+```{python  }
+#| code-fold: true
+#| code-summary: "Generate Test Dataset for KNN Evaluation"
+#| fig-cap: "Synthetic test dataset for evaluating KNN"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+# Set a different seed
+np.random.seed(24)
+
+# Generate 100 new points
+n_test = 100
+x1_test = np.random.uniform(-3, 3, n_test)
+x2_test = np.random.uniform(-3, 3, n_test)
+boundary_test = np.sin(4 * x1_test) + x1_test
+y_test = (x2_test > boundary_test).astype(int)
+
+# Combine into DataFrame
+test_data = pd.DataFrame({
+    "x1": x1_test,
+    "x2": x2_test,
+    "y": y_test
+})
+
+# Plot
+plt.figure()
+plt.scatter(test_data["x1"], test_data["x2"], c=test_data["y"], cmap="bwr", edgecolor="k", s=60)
+plt.plot(np.sort(x1_test), np.sort(boundary_test), linestyle="--", color="black", label="True Boundary")
+plt.xlabel("x1")
+plt.ylabel("x2")
+plt.title("Synthetic Test Data with True Boundary")
+plt.legend()
+plt.grid(True)
+plt.show()
+```
+
+
+```{python}
+#| code-fold: true
+#| code-summary: "Custom KNN Prediction on Test Data"
+#| message: false
+#| warning: false
+
+# Extract test features
+X_train = dat[["x1", "x2"]].values
+y_train = dat["y"].values
+X_test = test_data[["x1", "x2"]].values
+y_test = test_data["y"].values
+
+# Predict with custom KNN
+y_pred_custom = knn_predict(X_train, y_train, X_test, k=5)
+
+# Compute accuracy
+accuracy_custom = (y_pred_custom == y_test).mean()
+print(f"Custom KNN Accuracy on Test Set: {accuracy_custom:.2f}")
+```
+```{python}
+#| code-fold: true
+#| code-summary: "Compare with sklearn KNN"
+#| message: false
+#| warning: false
+
+from sklearn.neighbors import KNeighborsClassifier
+
+# Fit model
+knn_sklearn = KNeighborsClassifier(n_neighbors=5)
+knn_sklearn.fit(X_train, y_train)
+
+# Predict
+y_pred_sklearn = knn_sklearn.predict(X_test)
+
+# Accuracy
+accuracy_sklearn = (y_pred_sklearn == y_test).mean()
+print(f"Sklearn KNN Accuracy on Test Set: {accuracy_sklearn:.2f}")
+```
+
+### Implementing and Validating K-Nearest Neighbors
+
+To explore how the K-Nearest Neighbors (KNN) algorithm works, we implemented it from scratch and evaluated its performance on a synthetic test set of 100 new data points. Each point was classified based on the majority vote among its 5 nearest neighbors from the training data.
+
+To validate our implementation, we compared our predictions against those generated by `scikit-learn`'s built-in `KNeighborsClassifier`.
+
+####  Accuracy Results:
+- **Custom KNN Accuracy**: **92%**
+- **Scikit-learn KNN Accuracy**: **92%**
+
+These identical results confirm the correctness of our implementation. While the built-in version is optimized for speed and scalability, our manual approach offers a transparent view into how KNN operates — from distance calculations to voting.
+
+This exercise highlights the simplicity and power of KNN for nonlinear decision boundaries, and how well it generalizes when tuned appropriately.
+
+```{python}
+#| code-fold: true
+#| code-summary: "Tune K for Custom KNN"
+#| fig-cap: "Test Accuracy for Custom KNN as k Varies from 1 to 30"
+#| fig-width: 6
+#| fig-height: 5
+#| message: false
+#| warning: false
+
+accuracies = []
+
+for k in range(1, 31):
+    preds = knn_predict(X_train, y_train, X_test, k=k)
+    acc = (preds == y_test).mean() * 100  # convert to %
+    accuracies.append(acc)
+
+# Plotting
+plt.figure()
+plt.plot(range(1, 31), accuracies, marker='o')
+plt.xlabel("Number of Neighbors (k)")
+plt.ylabel("Test Accuracy (%)")
+plt.title("Custom KNN Accuracy on Test Set (k = 1 to 30)")
+plt.grid(True)
+plt.xticks(range(1, 31, 2))
+plt.show()
+```
+
+### Tuning the Number of Neighbors (k)
+
+To determine the optimal number of neighbors for K-Nearest Neighbors (KNN), we evaluated our custom classifier across values of `k` from 1 to 30. For each value of `k`, we calculated the percentage of correctly classified test points.
+
+The plot below shows how accuracy varies with the number of neighbors:
+
+- Peak accuracy occurs at **k = 1**, reaching **94%**
+- A small drop-off follows as `k` increases, with accuracy stabilizing between 87% and 91%.
+- The model begins to **underfit** slightly as `k` grows, since higher `k` values average over more neighbors and smooth the decision boundary too much
+
+This evaluation highlights a common tradeoff in KNN:
+
+- **Small k** values can be too sensitive to noise (**overfitting**)
+
+- **Large k** values can overlook finer patterns (**underfitting**)
+
+#### Optimal Value:
+In this case, the highest accuracy on the test set was achieved with **k = 1**, although values like **k = 3 or 5** still offer solid performance with better generalization.
+
+This process of tuning `k` demonstrates how model complexity impacts performance and why it’s essential to validate hyperparameters, even in simple algorithms like KNN.
+
+
+
+
+
+
